@@ -8,66 +8,57 @@ import re
 app = Flask(__name__)
 CORS(app)
 
-INVIDIOUS_INSTANCES = [
-    "https://invidious.fdn.fr",
-    "https://inv.nadeko.net", 
-    "https://invidious.nerdvpn.de",
-    "https://yt.drgnz.club"
+PIPED_INSTANCES = [
+    "https://pipedapi.kavin.rocks",
+    "https://piped-api.garudalinux.org",
+    "https://api.piped.projectsegfau.lt",
+    "https://pipedapi.in.projectsegfau.lt"
 ]
 
 def fetch_json(url):
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req, timeout=10) as r:
+    req = urllib.request.Request(url, headers={
+        'User-Agent': 'Mozilla/5.0',
+        'Accept': 'application/json'
+    })
+    with urllib.request.urlopen(req, timeout=15) as r:
         return json.loads(r.read().decode())
 
-def search_invidious(query, limit=20):
-    for instance in INVIDIOUS_INSTANCES:
+def search_piped(query, limit=20):
+    for instance in PIPED_INSTANCES:
         try:
-            url = f"{instance}/api/v1/search?q={urllib.parse.quote(query)}&type=video&fields=videoId,title,author,lengthSeconds,videoThumbnails"
+            url = f"{instance}/search?q={urllib.parse.quote(query)}&filter=music_songs"
             data = fetch_json(url)
             tracks = []
-            for v in data[:limit]:
-                thumb = ""
-                for t in v.get("videoThumbnails", []):
-                    if t.get("quality") in ["medium", "high", "maxres"]:
-                        thumb = t.get("url", "")
-                        break
-                if not thumb and v.get("videoThumbnails"):
-                    thumb = v["videoThumbnails"][0].get("url", "")
+            for v in data.get("items", [])[:limit]:
                 tracks.append({
-                    "id": v.get("videoId"),
+                    "id": v.get("url", "").replace("/watch?v=", ""),
                     "title": v.get("title"),
-                    "artist": v.get("author", "").replace(" - Topic", ""),
-                    "duration": v.get("lengthSeconds", 0),
-                    "thumbnail": thumb
+                    "artist": v.get("uploaderName", "").replace(" - Topic", ""),
+                    "duration": v.get("duration", 0),
+                    "thumbnail": v.get("thumbnail", "")
                 })
-            return tracks
+            if tracks:
+                return tracks
         except:
             continue
     return []
 
-def get_stream_invidious(video_id):
-    for instance in INVIDIOUS_INSTANCES:
+def get_stream_piped(video_id):
+    for instance in PIPED_INSTANCES:
         try:
-            url = f"{instance}/api/v1/videos/{video_id}?fields=adaptiveFormats,formatStreams"
+            url = f"{instance}/streams/{video_id}"
             data = fetch_json(url)
-            # Try adaptive formats (audio only)
-            for f in data.get("adaptiveFormats", []):
-                if "audio" in f.get("type", "") and "opus" in f.get("type", ""):
-                    return f.get("url")
-            for f in data.get("adaptiveFormats", []):
-                if "audio" in f.get("type", ""):
-                    return f.get("url")
-            # Fallback to format streams
-            for f in data.get("formatStreams", []):
-                return f.get("url")
+            # Get best audio stream
+            for s in data.get("audioStreams", []):
+                if s.get("mimeType", "").startswith("audio/"):
+                    return s.get("url")
         except:
             continue
     return None
 
 @app.route('/')
 def index():
-    return jsonify({"status": "ZenNify Backend Running!", "version": "2.0"})
+    return jsonify({"status": "ZenNify Backend Running!", "version": "3.0"})
 
 @app.route('/search')
 def search():
@@ -76,7 +67,7 @@ def search():
     if not query:
         return jsonify({'error': 'Query required'}), 400
     try:
-        tracks = search_invidious(query, limit)
+        tracks = search_piped(query, limit)
         return jsonify({'results': tracks})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -86,7 +77,7 @@ def stream(video_id):
     if not re.match(r'^[a-zA-Z0-9_-]{11}$', video_id):
         return jsonify({'error': 'Invalid video ID'}), 400
     try:
-        url = get_stream_invidious(video_id)
+        url = get_stream_piped(video_id)
         if url:
             return jsonify({'url': url})
         return jsonify({'error': 'Stream not found'}), 404
@@ -96,7 +87,7 @@ def stream(video_id):
 @app.route('/trending')
 def trending():
     try:
-        tracks = search_invidious('top hits 2024', 20)
+        tracks = search_piped('top hits 2024', 20)
         return jsonify({'results': tracks})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
