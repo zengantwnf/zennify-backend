@@ -7,7 +7,6 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-# Path to cookies file
 COOKIES_FILE = os.path.join(os.path.dirname(__file__), 'cookies.txt')
 
 def search_youtube(query, limit=20):
@@ -35,20 +34,47 @@ def get_audio_url(video_id):
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
-        'format': 'bestaudio/best',
+        'format': 'worstaudio/worst',  # Get any available audio
         'cookiefile': COOKIES_FILE if os.path.exists(COOKIES_FILE) else None,
     }
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-        for f in info.get('formats', []):
-            if f.get('acodec') != 'none' and f.get('vcodec') == 'none':
-                return f.get('url')
-        return info.get('url')
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+            # Try to get audio only format first
+            formats = info.get('formats', [])
+            
+            # Priority: audio only formats
+            for f in formats:
+                if f.get('acodec') != 'none' and f.get('vcodec') == 'none' and f.get('url'):
+                    return f.get('url')
+            
+            # Fallback: any format with audio
+            for f in formats:
+                if f.get('acodec') != 'none' and f.get('url'):
+                    return f.get('url')
+            
+            # Last resort: direct URL
+            if info.get('url'):
+                return info.get('url')
+                
+    except Exception as e:
+        # Try with different format
+        try:
+            ydl_opts['format'] = 'best'
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
+                return info.get('url')
+        except:
+            pass
+    return None
 
 @app.route('/')
 def index():
-    cookies_exists = os.path.exists(COOKIES_FILE)
-    return jsonify({'status': 'ZenNify Backend Running!', 'version': '6.0', 'cookies': cookies_exists})
+    return jsonify({
+        'status': 'ZenNify Backend Running!', 
+        'version': '7.0',
+        'cookies': os.path.exists(COOKIES_FILE)
+    })
 
 @app.route('/search')
 def search():
@@ -84,3 +110,4 @@ def trending():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080)
+
